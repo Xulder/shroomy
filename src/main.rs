@@ -1,10 +1,7 @@
 use bevy::{
-    prelude::Plugin,
     prelude::*,
     render::{camera::ScalingMode, texture::ImageSettings},
 };
-
-use bevy_inspector_egui::WorldInspectorPlugin;
 
 pub mod debug;
 pub mod player;
@@ -30,7 +27,6 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_startup_system(spawn_camera)
         .add_plugin(PlayerPlugin)
-        .add_plugin(WorldInspectorPlugin::new())
         // .add_plugin(DebugPlugin)
         .add_startup_system_to_stage(StartupStage::PreStartup, load_spritesheet)
         .run();

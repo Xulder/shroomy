@@ -1,12 +1,13 @@
 use bevy::prelude::*;
+use bevy_inspector_egui::Inspectable;
 
-use crate::{SpriteSheet, TILE_SIZE};
+use crate::{spritesheet::spawn_sprite, spritesheet::SpriteSheet, TILE_SIZE};
 
 pub struct PlayerPlugin;
 
-#[derive(Component)]
+#[derive(Component, Inspectable)]
 pub struct Player {
-    speed: f32,
+    pub speed: f32,
 }
 
 impl Plugin for PlayerPlugin {
@@ -38,21 +39,17 @@ fn player_movement(
 }
 
 fn spawn_player(mut commands: Commands, spritesheet: Res<SpriteSheet>) {
-    let mut sprite = TextureAtlasSprite::new(0);
-    sprite.color = Color::rgb(1.0, 1.0, 1.0);
-    sprite.custom_size = Some(Vec2::splat(TILE_SIZE));
+    let player = spawn_sprite(
+        &mut commands,
+        &spritesheet,
+        0,
+        Color::rgb(1., 1., 1.),
+        Vec3::new(0., 0., 900.),
+    );
 
     commands
-        .spawn_bundle(SpriteSheetBundle {
-            sprite,
-            texture_atlas: spritesheet.0.clone(),
-            transform: Transform {
-                translation: Vec3::new(0.0, 0.0, 900.0),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
+        .entity(player)
         .insert(Name::new("Player"))
-        .insert(Player { speed: 1.0 })
+        .insert(Player { speed: 1.2 })
         .id();
 }

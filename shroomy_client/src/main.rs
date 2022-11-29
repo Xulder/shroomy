@@ -11,15 +11,16 @@ use bevy_renet::{
 };
 use renet_visualizer::{RenetClientVisualizer, RenetVisualizerStyle};
 use shroomy_common::{
-    client_connection_config, ClientChannel, NetworkedEntities, PlayerInput, ServerChannel,
-    ServerMessages, PROTOCOL_ID,
+    client_connection_config, ClientChannel, NetworkedEntities, PlayerCommand, PlayerInput,
+    ServerChannel, ServerMessages, PROTOCOL_ID,
 };
 
-// TODO: Refactor to something better optimize for modestly multiplayer eventually (~100-300 players per area/region instance)
+// TODO: Potentially refactor to something better optimize for modest
+// multiplayer eventually (~100 players per in game area/region instance)
 #[derive(Default, Resource)]
 struct NetworkMapping(HashMap<Entity, Entity>);
 
-// TODO: This should move to a `player` module
+// TODO: Player related components and DTOs should be modularized
 #[derive(Component)]
 struct ControlledPlayer;
 
@@ -96,6 +97,7 @@ fn panic_on_error_system(mut renet_error: EventReader<RenetError>) {
     }
 }
 
+// NOTE: Should eventually mess with this and the style.
 fn update_visualizer_system(
     mut egui_context: ResMut<EguiContext>,
     mut visualizer: ResMut<RenetClientVisualizer<200>>,
@@ -126,6 +128,19 @@ fn client_send_input(player_input: Res<PlayerInput>, mut client: ResMut<RenetCli
     client.send_message(ClientChannel::Input, input_message);
 }
 
+// TODO: Impliment player commands see `shroomy_server/src/main.rs:133`
+// NOTE: Producers simply have to send a PlayerCommand to an EventWriter (just add one to a system after adding the event to the app)
+#[allow(unused)]
+fn client_send_player_commands(
+    mut player_commands: EventReader<PlayerCommand>,
+    mut client: ResMut<RenetClient>,
+) {
+    for command in player_commands.iter() {
+        let command_message = bincode::serialize(command).unwrap();
+        client.send_message(ClientChannel::Command, command_message);
+    }
+}
+
 fn client_sync_players(
     mut commands: Commands,
     player_spritesheet: Res<PlayerSpriteSheet>,
@@ -144,6 +159,7 @@ fn client_sync_players(
             } => {
                 println!("Player {} connected.", id);
                 let mut sprite = TextureAtlasSprite::new(0);
+                // offsets the color of other client's sprites
                 sprite.color = if client_id == id {
                     Color::rgb(1.0, 1.0, 1.0)
                 } else {
@@ -182,10 +198,16 @@ fn client_sync_players(
                     commands.entity(client_entity).despawn();
                     network_mapping.0.remove(&server_entity);
                 }
-            }
+            } // TODO: Other kinds of server messages will need to be implemented.
+              // This can be abstracted down into modules onces a clear seperation of domain occurs.
+              // Planning and mapping out seems like a good idea here. A lot of content will revolve
+              // around messages received from the server and vise versa.
+              // Enemy attacks (pve or pvp), spells, dialogue triggers, popup windows, etc.
         }
     }
 
+    // NOTE: This is simply updating the in-memory data for entities from the server.
+    // I'm not sure what the limit to the HashMap would be, so profiling tests might be necessary.
     while let Some(message) = client.receive_message(ServerChannel::NetworkedEntities) {
         let networked_entities: NetworkedEntities = bincode::deserialize(&message).unwrap();
 
@@ -202,15 +224,17 @@ fn client_sync_players(
     }
 }
 
-// TODO: This will be moved to the player module
+// TODO: Should be moved to a player module
 // TODO: Add animation and spritesheets to go with it
 // TODO: Should set this up to load any part of an unequipped player character
+/// Adds player spritesheet as a resource. This should be compatible with animation.
 fn load_player_spritesheet(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
 ) {
     let image = assets.load("player_sprite.png");
+    // NOTE: Padding should be added when full spritesheets are made.
     let atlas = TextureAtlas::from_grid(image, Vec2::splat(32.0), 1, 1, None, None);
 
     let atlas_handle = texture_atlases.add(atlas);
@@ -218,11 +242,14 @@ fn load_player_spritesheet(
     commands.insert_resource(PlayerSpriteSheet(atlas_handle));
 }
 
+// NOTE: This is kept isolated as a system for scaling purposes.
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
 // TODO: Implement following camera
+// NOTE: Potentially look into smooth bevy cameras [https://docs.rs/smooth-bevy-cameras/latest/smooth_bevy_cameras/]
+//       I imagine you could just access the `ControlledPlayer` with it's transform too.
 // fn camera_follow() {
 
 // }

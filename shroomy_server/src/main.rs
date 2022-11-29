@@ -56,6 +56,7 @@ fn main() {
     app.add_system(update_visualizer_system);
 
     // NOTE: This might be useful down the line for observing instances visually without having to interact with client windows
+    // Any sprite/asset related things could potentially be moved to common or a new crate if this is done.
     // app.add_startup_system(admin_camera?);
 
     app.run();
@@ -130,6 +131,10 @@ fn server_update_system(
     }
 
     for client_id in server.clients_id().into_iter() {
+        /* TODO: Consume and broadcast player commands here
+         * The structure should look similar to the below while loop, but match against PlayerCommand
+         * varients and use `broadcast_message`
+         */
         while let Some(message) = server.receive_message(client_id, ClientChannel::Input) {
             let input: PlayerInput = bincode::deserialize(&message).unwrap();
             if let Some(player_entity) = lobby.players.get(&client_id) {
@@ -148,6 +153,7 @@ fn update_visualizer_system(
     visualizer.show_window(egui_context.ctx_mut());
 }
 
+//
 #[allow(clippy::type_complexity)]
 fn server_network_sync(
     mut server: ResMut<RenetServer>,
@@ -165,7 +171,7 @@ fn server_network_sync(
     server.broadcast_message(ServerChannel::NetworkedEntities, sync_message);
 }
 
-// BUG: Completely borked. Doesn't seem to work at all
+// NOTE: Uses a normalized vec for determining direction so diagnals are ezclap
 fn move_players_system(mut query: Query<(&mut Transform, &PlayerInput)>) {
     for (mut transform, input) in query.iter_mut() {
         let x = (input.right as i8 - input.left as i8) as f32;

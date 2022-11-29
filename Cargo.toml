@@ -1,3 +1,3 @@
 [workspace]
-members = ["shroomy-client", "shroomy-server"]
+members = ["shroomy_client", "shroomy_server", "shroomy_common"]
 resolver = "2"

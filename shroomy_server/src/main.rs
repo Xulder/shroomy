@@ -1,14 +1,25 @@
-use bevy::prelude::*;
+use std::{collections::HashMap, net::UdpSocket, time::SystemTime};
+
+use bevy::{
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    prelude::*,
+};
+use bevy_egui::{EguiContext, EguiPlugin};
 use bevy_renet::{
     renet::{RenetServer, ServerAuthentication, ServerConfig, ServerEvent},
     RenetServerPlugin,
 };
+use rand::{thread_rng, Rng};
+use renet_visualizer::RenetServerVisualizer;
 use shroomy_common::{
-    server_connection_config, NetworkedEntities, Player, PlayerInput, ServerChannel,
+    server_connection_config, ClientChannel, NetworkedEntities, Player, PlayerInput, ServerChannel,
     ServerMessages, PROTOCOL_ID,
 };
-use std::{collections::HashMap, net::UdpSocket, time::SystemTime};
 
+// TODO: Move to player module
+const PLAYER_MOVE_SPEED: f32 = 5.0;
+
+// TODO: Refactor for multiple instances
 #[derive(Debug, Default, Resource)]
 pub struct ServerLobby {
     pub players: HashMap<u64, Entity>,
@@ -29,12 +40,23 @@ fn new_renet_server() -> RenetServer {
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins);
+
     app.add_plugin(RenetServerPlugin::default());
+    app.add_plugin(FrameTimeDiagnosticsPlugin::default());
+    app.add_plugin(LogDiagnosticsPlugin::default());
+    app.add_plugin(EguiPlugin);
+
     app.insert_resource(ServerLobby::default());
     app.insert_resource(new_renet_server());
+    app.insert_resource(RenetServerVisualizer::<200>::default());
 
     app.add_system(server_update_system);
     app.add_system(server_network_sync);
+    app.add_system(move_players_system);
+    app.add_system(update_visualizer_system);
+
+    // NOTE: This might be useful down the line for observing instances visually without having to interact with client windows
+    // app.add_startup_system(admin_camera?);
 
     app.run();
 }
@@ -45,39 +67,57 @@ fn server_update_system(
     mut commands: Commands,
     mut lobby: ResMut<ServerLobby>,
     mut server: ResMut<RenetServer>,
-    players: Query<(Entity, &Player)>,
+    mut visualizer: ResMut<RenetServerVisualizer<200>>,
+    players: Query<(Entity, &Player, &Transform)>,
 ) {
     for event in server_events.iter() {
         match event {
             ServerEvent::ClientConnected(id, _) => {
                 println!("Player {} connected.", id);
+                visualizer.add_client(*id);
 
-                for (entity, player) in players.iter() {
+                for (entity, player, transform) in players.iter() {
+                    let translation: [f32; 3] = transform.translation.into();
                     let message = bincode::serialize(&ServerMessages::PlayerCreate {
                         entity,
                         id: player.id,
+                        translation,
                     })
                     .unwrap();
                     server.send_message(*id, ServerChannel::ServerMessages, message);
                 }
 
+                // let transform = Transform::from_xyz(0.0, 0.51, 0.0);
+                // NOTE: Testing purposes so clients don't stack
+                let mut rng = thread_rng();
+                let transform = Transform::from_xyz(
+                    rng.gen_range(-50.0..50.0),
+                    rng.gen_range(-50.0..50.0),
+                    900.0,
+                );
                 let player_entity = commands
-                    .spawn_empty()
+                    .spawn(TransformBundle {
+                        local: transform,
+                        ..Default::default()
+                    })
                     .insert(PlayerInput::default())
                     .insert(Player { id: *id })
                     .id();
 
                 lobby.players.insert(*id, player_entity);
 
+                let translation = transform.translation.into();
                 let message = bincode::serialize(&ServerMessages::PlayerCreate {
                     id: *id,
                     entity: player_entity,
+                    translation,
                 })
                 .unwrap();
                 server.broadcast_message(ServerChannel::ServerMessages, message);
             }
             ServerEvent::ClientDisconnected(id) => {
                 println!("Player {} disconnected.", id);
+                visualizer.remove_client(*id);
                 if let Some(player_entity) = lobby.players.remove(id) {
                     commands.entity(player_entity).despawn();
                 }
@@ -88,15 +128,50 @@ fn server_update_system(
             }
         }
     }
+
+    for client_id in server.clients_id().into_iter() {
+        while let Some(message) = server.receive_message(client_id, ClientChannel::Input) {
+            let input: PlayerInput = bincode::deserialize(&message).unwrap();
+            if let Some(player_entity) = lobby.players.get(&client_id) {
+                commands.entity(*player_entity).insert(input);
+            }
+        }
+    }
+}
+
+fn update_visualizer_system(
+    mut egui_context: ResMut<EguiContext>,
+    mut visualizer: ResMut<RenetServerVisualizer<200>>,
+    server: Res<RenetServer>,
+) {
+    visualizer.update(&server);
+    visualizer.show_window(egui_context.ctx_mut());
 }
 
 #[allow(clippy::type_complexity)]
-fn server_network_sync(mut server: ResMut<RenetServer>, query: Query<Entity, With<Player>>) {
+fn server_network_sync(
+    mut server: ResMut<RenetServer>,
+    query: Query<(Entity, &Transform), With<Player>>,
+) {
     let mut networked_entities = NetworkedEntities::default();
-    for entity in query.iter() {
+    for (entity, transform) in query.iter() {
         networked_entities.entities.push(entity);
+        networked_entities
+            .translations
+            .push(transform.translation.into());
     }
 
     let sync_message = bincode::serialize(&networked_entities).unwrap();
     server.broadcast_message(ServerChannel::NetworkedEntities, sync_message);
+}
+
+// BUG: Completely borked. Doesn't seem to work at all
+fn move_players_system(mut query: Query<(&mut Transform, &PlayerInput)>) {
+    for (mut transform, input) in query.iter_mut() {
+        let x = (input.right as i8 - input.left as i8) as f32;
+        let y = (input.up as i8 - input.down as i8) as f32;
+        let direction = Vec2::new(x, y).normalize_or_zero();
+        transform.translation.x = transform.translation.x + (direction.x * PLAYER_MOVE_SPEED);
+        transform.translation.y = transform.translation.y + (direction.y * PLAYER_MOVE_SPEED);
+    }
 }

@@ -35,6 +35,9 @@ pub enum PlayerCommand {
     BasicAttack { cast_at: Vec2 },
 }
 
+// NOTE: I'm not really sure what more would be added either set of channels.
+// I suppose when there's a reasonable divide of concerns under either `Input` or `Command`
+//  they could be split down into more niche variants.
 pub enum ClientChannel {
     Input,
     Command,
@@ -50,7 +53,7 @@ pub enum ServerMessages {
     PlayerCreate {
         entity: Entity,
         id: u64,
-        // translation: [f32; 3],
+        translation: [f32; 3],
     },
     PlayerRemove {
         id: u64,
@@ -60,7 +63,7 @@ pub enum ServerMessages {
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct NetworkedEntities {
     pub entities: Vec<Entity>,
-    // pub translations: Vec<[f32; 3]>,
+    pub translations: Vec<[f32; 3]>,
 }
 
 impl From<ClientChannel> for u8 {

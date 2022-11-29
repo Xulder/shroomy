@@ -1,5 +1,5 @@
 /target
-/.config
+/.cargo
 /rust-toolchain.toml
 *.lock
 rust-toolchain.toml

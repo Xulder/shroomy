@@ -1,3 +1,4 @@
 /target
 /.config
 *.lock
+rust-toolchain.toml

@@ -73,6 +73,9 @@ fn server_update_system(
 ) {
     for event in server_events.iter() {
         match event {
+            // TODO: A lot of this player creation code should be thrown into a player module
+            // Obviously a huge expansion of content should be added to this code
+            // Character customization, stats, abilities, associated account(s), etc.
             ServerEvent::ClientConnected(id, _) => {
                 println!("Player {} connected.", id);
                 visualizer.add_client(*id);
@@ -88,7 +91,7 @@ fn server_update_system(
                     server.send_message(*id, ServerChannel::ServerMessages, message);
                 }
 
-                // let transform = Transform::from_xyz(0.0, 0.51, 0.0);
+                // let transform = Transform::from_xyz(0.0, 0.0, 0.0);
                 // NOTE: Testing purposes so clients don't stack
                 let mut rng = thread_rng();
                 let transform = Transform::from_xyz(

@@ -4,16 +4,15 @@ use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
 };
+use bevy_quinnet::{
+    client::{
+        certificate::CertificateVerificationMode, Client, ConnectionConfiguration, ConnectionEvent,
+        QuinnetClientPlugin,
+    },
+    shared::ClientId,
+};
 use bevy_egui::{EguiContext, EguiPlugin};
-use bevy_renet::{
-    renet::{ClientAuthentication, RenetClient, RenetError},
-    run_if_client_connected, RenetClientPlugin,
-};
-use renet_visualizer::{RenetClientVisualizer, RenetVisualizerStyle};
-use shroomy_common::{
-    client_connection_config, ClientChannel, NetworkedEntities, PlayerCommand, PlayerInput,
-    ServerChannel, ServerMessages, PROTOCOL_ID,
-};
+use shroomy_common::{ClientMessage, NetworkedEntities, PlayerCommand, PlayerInput, ServerChannel, ServerMessage};
 
 // TODO: Potentially refactor to something better optimize for modest
 // multiplayer eventually (~100 players per in game area/region instance)
@@ -38,30 +37,12 @@ struct ClientLobby {
 #[derive(Debug, Resource)]
 struct PlayerSpriteSheet(Handle<TextureAtlas>);
 
-fn new_renet_client() -> RenetClient {
-    let server_addr = "127.0.0.1:5000".parse().unwrap();
-    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-    let connection_config = client_connection_config();
-    let current_time = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap();
-    let client_id = current_time.as_millis() as u64;
-    let authentication = ClientAuthentication::Unsecure {
-        client_id,
-        protocol_id: PROTOCOL_ID,
-        server_addr,
-        user_data: None,
-    };
-
-    RenetClient::new(current_time, socket, connection_config, authentication).unwrap()
-}
-
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()));
-    app.add_plugin(RenetClientPlugin::default());
-    app.add_plugin(FrameTimeDiagnosticsPlugin::default());
-    app.add_plugin(LogDiagnosticsPlugin::default());
+    app.add_plugin(QuinnetClientPlugin::default());
+    //app.add_plugin(FrameTimeDiagnosticsPlugin::default());
+    //app.add_plugin(LogDiagnosticsPlugin::default());
     app.add_plugin(EguiPlugin);
 
     // TODO: Implement player commands
@@ -69,49 +50,27 @@ fn main() {
 
     app.insert_resource(ClientLobby::default());
     app.insert_resource(PlayerInput::default());
-    app.insert_resource(new_renet_client());
     app.insert_resource(NetworkMapping::default());
 
     app.add_system(player_input);
     // app.add_system(camera_follow);
-    app.add_system(client_send_input.with_run_criteria(run_if_client_connected));
+    app.add_system(client_send_input);
     // app.add_system(client_send_player_commands.with_run_criteria(run_if_client_connected));
-    app.add_system(client_sync_players.with_run_criteria(run_if_client_connected));
+    app.add_system(client_sync_players);
+    app.add_system(handle_client_events);
 
-    app.insert_resource(RenetClientVisualizer::<200>::new(
-        RenetVisualizerStyle::default(),
-    ));
-    app.add_system(update_visualizer_system);
-
+    app.add_startup_system(start_connection);
     app.add_startup_system(setup_camera);
     app.add_startup_system(load_player_spritesheet);
-    app.add_system(panic_on_error_system);
 
     app.run();
 }
 
-/// panic on netcode error
-fn panic_on_error_system(mut renet_error: EventReader<RenetError>) {
-    for e in renet_error.iter() {
-        panic!("{}", e);
-    }
-}
-
-// NOTE: Should eventually mess with this and the style.
-fn update_visualizer_system(
-    mut egui_context: ResMut<EguiContext>,
-    mut visualizer: ResMut<RenetClientVisualizer<200>>,
-    client: Res<RenetClient>,
-    mut show_visualizer: Local<bool>,
-    keyboard_input: Res<Input<KeyCode>>,
-) {
-    visualizer.add_network_info(client.network_info());
-    if keyboard_input.just_pressed(KeyCode::F1) {
-        *show_visualizer = !*show_visualizer;
-    }
-    if *show_visualizer {
-        visualizer.show_window(egui_context.ctx_mut());
-    }
+fn start_connection(mut client: ResMut<Client>) {
+    client.open_connection(
+        ConnectionConfiguration::new("127.0.0.1".to_string(), 6000, "0.0.0.0".to_string(), 0),
+        CertificateVerificationMode::SkipVerification,
+    );
 }
 
 fn player_input(keyboard_input: Res<Input<KeyCode>>, mut player_input: ResMut<PlayerInput>) {
@@ -122,37 +81,52 @@ fn player_input(keyboard_input: Res<Input<KeyCode>>, mut player_input: ResMut<Pl
     player_input.down = keyboard_input.pressed(KeyCode::S) || keyboard_input.pressed(KeyCode::Down);
 }
 
-fn client_send_input(player_input: Res<PlayerInput>, mut client: ResMut<RenetClient>) {
+fn client_send_input(player_input: Res<PlayerInput>, mut client: ResMut<Client>) {
     let input_message = bincode::serialize(&*player_input).unwrap();
 
-    client.send_message(ClientChannel::Input, input_message);
+    client
+        .connection()
+        .send_message(input_message)
+        .unwrap();
 }
 
-// TODO: Impliment player commands see `shroomy_server/src/main.rs:133`
+// TODO: Implement player commands see `shroomy_server/src/main.rs:133`
 // NOTE: Producers simply have to send a PlayerCommand to an EventWriter (just add one to a system after adding the event to the app)
 #[allow(unused)]
 fn client_send_player_commands(
     mut player_commands: EventReader<PlayerCommand>,
-    mut client: ResMut<RenetClient>,
+    mut client: ResMut<Client>,
 ) {
     for command in player_commands.iter() {
         let command_message = bincode::serialize(command).unwrap();
-        client.send_message(ClientChannel::Command, command_message);
+
+        client
+            .connection()
+            .send_message(command_message);
     }
 }
 
 fn client_sync_players(
     mut commands: Commands,
     player_spritesheet: Res<PlayerSpriteSheet>,
-    mut client: ResMut<RenetClient>,
+    mut client: ResMut<Client>,
     mut lobby: ResMut<ClientLobby>,
     mut network_mapping: ResMut<NetworkMapping>,
 ) {
-    let client_id = client.client_id();
-    while let Some(message) = client.receive_message(ServerChannel::ServerMessages) {
-        let server_message = bincode::deserialize(&message).unwrap();
-        match server_message {
-            ServerMessages::PlayerCreate {
+    while let Some(message) = client
+        .connection_mut()
+        .try_receive_message::<ServerMessage>()
+    {
+        //let server_message = bincode::deserialize(&message).unwrap();
+        match message {
+            ServerMessage::ClientDisconnected { client_id } => {
+                if let Some(_) = lobby.players.remove(&client_id) {
+                    println!("{} left", client_id);
+                } else {
+                    warn!("ClientDisconnected for an unknown client_id: {}", client_id)
+                }
+            }
+            ServerMessage::PlayerCreate {
                 entity,
                 id,
                 translation,
@@ -160,11 +134,12 @@ fn client_sync_players(
                 println!("Player {} connected.", id);
                 let mut sprite = TextureAtlasSprite::new(0);
                 // offsets the color of other client's sprites
-                sprite.color = if client_id == id {
+                sprite.color = Color::rgb(1.0, 1.0, 1.0);
+                /*if client_id == id {
                     Color::rgb(1.0, 1.0, 1.0)
                 } else {
                     Color::rgb(1.0, 0.6, 0.6)
-                };
+                };*/
                 sprite.custom_size = Some(Vec2::splat(64.0));
 
                 let mut client_entity = commands.spawn(SpriteSheetBundle {
@@ -177,9 +152,11 @@ fn client_sync_players(
                     ..Default::default()
                 });
 
-                if client_id == id {
+                /*if client_id == id {
                     client_entity.insert(ControlledPlayer);
-                }
+                }*/
+
+                client_entity.insert(ControlledPlayer);
 
                 let player_info = PlayerInfo {
                     server_entity: entity,
@@ -188,7 +165,7 @@ fn client_sync_players(
                 lobby.players.insert(id, player_info);
                 network_mapping.0.insert(entity, client_entity.id());
             }
-            ServerMessages::PlayerRemove { id } => {
+            ServerMessage::PlayerRemove { id } => {
                 println!("Player {} disconnected.", id);
                 if let Some(PlayerInfo {
                     server_entity,
@@ -208,12 +185,12 @@ fn client_sync_players(
 
     // NOTE: This is simply updating the in-memory data for entities from the server.
     // I'm not sure what the limit to the HashMap would be, so profiling tests might be necessary.
-    while let Some(message) = client.receive_message(ServerChannel::NetworkedEntities) {
-        let networked_entities: NetworkedEntities = bincode::deserialize(&message).unwrap();
+    while let Some(message) = client.connection_mut().try_receive_message::<NetworkedEntities>() {
+        //let networked_entities: NetworkedEntities = bincode::deserialize(&message).unwrap();
 
-        for i in 0..networked_entities.entities.len() {
-            if let Some(entity) = network_mapping.0.get(&networked_entities.entities[i]) {
-                let translation = networked_entities.translations[i].into();
+        for i in 0..message.entities.len() {
+            if let Some(entity) = network_mapping.0.get(&message.entities[i]) {
+                let translation = message.translations[i].into();
                 let transform = Transform {
                     translation,
                     ..Default::default()
@@ -240,6 +217,17 @@ fn load_player_spritesheet(
     let atlas_handle = texture_atlases.add(atlas);
 
     commands.insert_resource(PlayerSpriteSheet(atlas_handle));
+}
+
+fn handle_client_events(connection_events: EventReader<ConnectionEvent>, client: ResMut<Client>) {
+    if !connection_events.is_empty() {
+        client
+            .connection()
+            .send_message(ClientMessage::Join { })
+            .unwrap();
+
+        connection_events.clear();
+    }
 }
 
 // NOTE: This is kept isolated as a system for scaling purposes.

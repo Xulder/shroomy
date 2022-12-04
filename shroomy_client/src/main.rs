@@ -82,11 +82,11 @@ fn player_input(keyboard_input: Res<Input<KeyCode>>, mut player_input: ResMut<Pl
 }
 
 fn client_send_input(player_input: Res<PlayerInput>, mut client: ResMut<Client>) {
-    let input_message = bincode::serialize(&*player_input).unwrap();
+   // let input_message = bincode::serialize(&*player_input).unwrap();
 
     client
         .connection()
-        .send_message(input_message)
+        .send_message(*player_input)
         .unwrap();
 }
 

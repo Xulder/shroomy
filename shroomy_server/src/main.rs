@@ -126,18 +126,16 @@ fn server_update_system(
         }
     }
 
-    for (client_id, _) in &lobby.players {
         /* TODO: Consume and broadcast player commands here
          * The structure should look similar to the below while loop, but match against PlayerCommand
          * varients and use `broadcast_message`
          */
-        while let Ok(Some(message)) = endpoint.receive_message::<PlayerInput>() {
+        while let Ok(Some((message, client_id))) = endpoint.receive_message::<PlayerInput>() {
             //let input: PlayerInput = bincode::deserialize(&message).unwrap();
             if let Some(player_entity) = lobby.players.get(&client_id) {
-                //commands.entity(*player_entity).insert(message);
+                commands.entity(*player_entity).insert(message);
             }
         }
-    }
 }
 
 fn handle_server_events(

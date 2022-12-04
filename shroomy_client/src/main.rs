@@ -9,7 +9,7 @@ use bevy::{
     app::AppExit,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
-    window,
+    window::{self, exit_on_all_closed},
 };
 use bevy_egui::{EguiContext, EguiPlugin};
 use bevy_renet::{
@@ -97,15 +97,18 @@ fn main() {
     app.add_startup_system(setup_camera);
     app.add_startup_system(load_player_spritesheet);
     app.add_system(panic_on_error_system);
-    app.add_system_to_stage(CoreStage::PostUpdate, on_app_exit);
+    app.add_system_to_stage(
+        CoreStage::PostUpdate,
+        disconnect_on_exit.after(exit_on_all_closed),
+    );
 
     app.run();
 }
 
-pub fn on_app_exit(app_exit_events: EventReader<AppExit>, mut client: ResMut<RenetClient>) {
-    if !app_exit_events.is_empty() {
+pub fn disconnect_on_exit(app_exit_events: EventReader<AppExit>, mut client: ResMut<RenetClient>) {
+    if !app_exit_events.is_empty() && client.is_connected() {
         client.disconnect();
-        sleep(Duration::from_secs_f32(0.1));
+        // sleep(Duration::from_secs_f32(0.1));
     }
 }
 

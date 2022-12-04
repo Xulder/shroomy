@@ -1,12 +1,13 @@
 use std::{collections::HashMap, net::UdpSocket, time::SystemTime};
 
 use bevy::{
+    app::AppExit,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
 };
 use bevy_egui::{EguiContext, EguiPlugin};
 use bevy_renet::{
-    renet::{RenetServer, ServerAuthentication, ServerConfig, ServerEvent},
+    renet::{RenetClient, RenetServer, ServerAuthentication, ServerConfig, ServerEvent},
     RenetServerPlugin,
 };
 use rand::{thread_rng, Rng};
@@ -52,6 +53,8 @@ fn main() {
 
     app.add_system(server_update_system);
     app.add_system(server_network_sync);
+    // app.add_system_to_stage(CoreStage::PostUpdate, server_update_system);
+    // app.add_system_to_stage(CoreStage::PostUpdate, server_network_sync);
     app.add_system(move_players_system);
     app.add_system(update_visualizer_system);
 

@@ -1,8 +1,15 @@
-use std::{collections::HashMap, net::UdpSocket, time::SystemTime};
+use std::{
+    collections::HashMap,
+    net::UdpSocket,
+    thread::sleep,
+    time::{Duration, SystemTime},
+};
 
 use bevy::{
+    app::AppExit,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
+    window,
 };
 use bevy_egui::{EguiContext, EguiPlugin};
 use bevy_renet::{
@@ -72,11 +79,15 @@ fn main() {
     app.insert_resource(new_renet_client());
     app.insert_resource(NetworkMapping::default());
 
+    app.add_system(window::close_on_esc);
     app.add_system(player_input);
     // app.add_system(camera_follow);
     app.add_system(client_send_input.with_run_criteria(run_if_client_connected));
     // app.add_system(client_send_player_commands.with_run_criteria(run_if_client_connected));
-    app.add_system(client_sync_players.with_run_criteria(run_if_client_connected));
+    app.add_system_to_stage(
+        CoreStage::PostUpdate,
+        client_sync_players.with_run_criteria(run_if_client_connected),
+    );
 
     app.insert_resource(RenetClientVisualizer::<200>::new(
         RenetVisualizerStyle::default(),
@@ -86,8 +97,16 @@ fn main() {
     app.add_startup_system(setup_camera);
     app.add_startup_system(load_player_spritesheet);
     app.add_system(panic_on_error_system);
+    app.add_system_to_stage(CoreStage::PostUpdate, on_app_exit);
 
     app.run();
+}
+
+pub fn on_app_exit(app_exit_events: EventReader<AppExit>, mut client: ResMut<RenetClient>) {
+    if !app_exit_events.is_empty() {
+        client.disconnect();
+        sleep(Duration::from_secs_f32(0.1));
+    }
 }
 
 /// panic on netcode error
